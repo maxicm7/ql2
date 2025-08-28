@@ -71,7 +71,6 @@ def load_historical_combinations(uploaded_file):
             return []
     return []
 
-# --- NUEVO: Función para analizar el Cálculo Especial en el historial ---
 @st.cache_data
 def analyze_historical_special_calc(historical_sets, total_atraso_dataset, numero_a_atraso):
     """Calcula la distribución del 'Cálculo Especial' para el set de datos histórico."""
@@ -80,7 +79,6 @@ def analyze_historical_special_calc(historical_sets, total_atraso_dataset, numer
     
     special_calc_values = []
     for comb_set in historical_sets:
-        # Sumar solo si el número está en el mapa de atrasos
         suma_atrasos_comb = sum(numero_a_atraso.get(str(num), 0) for num in comb_set if str(num) in numero_a_atraso)
         valor_especial = total_atraso_dataset + 40 - suma_atrasos_comb
         special_calc_values.append(valor_especial)
@@ -99,7 +97,7 @@ def generar_combinaciones_con_restricciones(distribucion_probabilidad, numero_a_
     valores = list(distribucion_probabilidad.keys())
     combinaciones = []
     intentos_totales = 0
-    max_intentos = n_combinaciones * 200 # Aumentar margen por la nueva restricción
+    max_intentos = n_combinaciones * 200
 
     while len(combinaciones) < n_combinaciones and intentos_totales < max_intentos:
         intentos_totales += 1
@@ -113,7 +111,7 @@ def generar_combinaciones_con_restricciones(distribucion_probabilidad, numero_a_
                 if v not in usados and atrasos_seleccionados.get(str(numero_a_atraso.get(v)), 0) < restricciones_atraso.get(str(numero_a_atraso.get(v)), n_selecciones)
             ]
             if not valores_posibles: break
-            nuevo_valor = random.choice(valores_posibles) # Simplificado a elección uniforme entre válidos
+            nuevo_valor = random.choice(valores_posibles)
             seleccionados.append(nuevo_valor)
             usados.add(nuevo_valor)
             atraso = numero_a_atraso.get(nuevo_valor)
@@ -129,7 +127,6 @@ def generar_combinaciones_con_restricciones(distribucion_probabilidad, numero_a_
                         break
             
             if es_valida_historial:
-                # --- NUEVO: Validar si el Cálculo Especial está en el rango deseado ---
                 suma_atrasos_comb = sum(numero_a_atraso.get(val, 0) for val in seleccionados)
                 valor_especial = total_atraso_dataset + 40 - suma_atrasos_comb
                 if special_calc_range[0] <= valor_especial <= special_calc_range[1]:
@@ -151,18 +148,52 @@ def procesar_combinaciones(distribucion_probabilidad, numero_a_atraso, restricci
     with ProcessPoolExecutor() as executor:
         futures = [executor.submit(generar_combinaciones_con_restricciones, *task_args) for _ in range(n_ejecuciones)]
         for future in as_completed(futures):
-            resultados.append(future.result())
+            try:
+                resultados.append(future.result())
+            except Exception as e:
+                st.error(f"Un proceso falló: {e}")
     return resultados
 
 
 def encontrar_combinaciones_coincidentes(resultados):
     if not resultados: return {}
-    counts = Counter(comb for res in resultados for comb, _ in res)
+    # Aplanar la lista de resultados para obtener todas las combinaciones
+    all_combs = [comb for res_proceso in resultados for comb, _ in res_proceso]
+    counts = Counter(all_combs)
+    # Devolver combinaciones que aparecen en TODAS las ejecuciones
     return {comb: [] for comb, count in counts.items() if count == len(resultados)}
 
+# --- NUEVA FUNCIÓN DE ANÁLISIS ---
+def analizar_suma_especial_probabilidad(resultados, numero_a_atraso, total_atraso_dataset):
+    """
+    Analiza todos los resultados de la simulación para encontrar el 'Cálculo Especial' más frecuente.
+    """
+    if not resultados or not numero_a_atraso or total_atraso_dataset is None:
+        return None
+
+    suma_especial_counts = Counter()
+    total_combinaciones_generadas = 0
+
+    # Iteramos sobre los resultados de cada proceso/ejecución
+    for res_proceso in resultados:
+        # Iteramos sobre cada combinación única encontrada en ese proceso
+        for combinacion, (frecuencia, _) in res_proceso:
+            # Calculamos el 'Cálculo Especial' para esta combinación
+            suma_atrasos = sum(numero_a_atraso.get(val, 0) for val in combinacion)
+            valor_especial = total_atraso_dataset + 40 - suma_atrasos
+            
+            # Añadimos a nuestro contador, ponderado por la frecuencia con que apareció
+            suma_especial_counts[valor_especial] += frecuencia
+            total_combinaciones_generadas += frecuencia
+            
+    if not suma_especial_counts:
+        return None
+
+    # Devolvemos el contador completo y el total de combinaciones
+    return suma_especial_counts, total_combinaciones_generadas
 
 def evaluar_individuo_deap(individuo, distribucion_prob, num_atraso, restr_atraso, n_sel, historical_combinations, total_atraso_dataset, special_calc_range):
-    if len(individuo) != n_sel: return (0,)
+    if len(individuo) != n_sel or len(set(individuo)) != n_sel: return (0,) # Chequeo de duplicados
     
     atrasos = Counter(num_atraso.get(val) for val in individuo if num_atraso.get(val) is not None)
     for atraso, cantidad in atrasos.items():
@@ -173,7 +204,6 @@ def evaluar_individuo_deap(individuo, distribucion_prob, num_atraso, restr_atras
         for hist_set in historical_combinations:
             if len(individuo_set.intersection(hist_set)) > 2: return (0,)
             
-    # --- NUEVO: Penalizar si el Cálculo Especial está fuera de rango ---
     suma_atrasos = sum(num_atraso.get(val, 0) for val in individuo)
     valor_especial = total_atraso_dataset + 40 - suma_atrasos
     if not (special_calc_range[0] <= valor_especial <= special_calc_range[1]):
@@ -185,9 +215,11 @@ def evaluar_individuo_deap(individuo, distribucion_prob, num_atraso, restr_atras
 
 def ejecutar_algoritmo_genetico(n_generaciones, n_poblacion, cxpb, mutpb, distribucion_prob, numero_a_atraso, restricciones_atraso, historical_combinations, total_atraso_dataset, special_calc_range, n_selecciones=6):
     toolbox = base.Toolbox()
-    toolbox.register("individual", tools.initRepeat, creator.Individual, lambda: random.choice(list(distribucion_prob.keys())), n_selecciones)
+    # Usamos sample para garantizar individuos sin duplicados desde el inicio
+    toolbox.register("indices", random.sample, list(distribucion_prob.keys()), n_selecciones)
+    toolbox.register("individual", tools.initIterate, creator.Individual, toolbox.indices)
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-    # --- Pasar los nuevos parámetros a la función de evaluación ---
+    
     toolbox.register("evaluate", evaluar_individuo_deap, distribucion_prob=distribucion_prob, num_atraso=numero_a_atraso, restr_atraso=restricciones_atraso, n_sel=n_selecciones, historical_combinations=historical_combinations, total_atraso_dataset=total_atraso_dataset, special_calc_range=special_calc_range)
     toolbox.register("mate", tools.cxTwoPoint)
     toolbox.register("mutate", tools.mutShuffleIndexes, indpb=0.1)
@@ -198,7 +230,6 @@ def ejecutar_algoritmo_genetico(n_generaciones, n_poblacion, cxpb, mutpb, distri
     
     best_ind = tools.selBest(population, k=1)[0] if population else None
     if best_ind:
-        # Asegurarse de que no haya duplicados y tenga el tamaño correcto después de la evolución
         best_ind = sorted(list(set(best_ind)), key=int)
         if len(best_ind) != n_selecciones: return None, 0.0, "El AG no pudo mantener individuos válidos."
         best_fitness = toolbox.evaluate(best_ind)[0]
@@ -227,7 +258,6 @@ st.header("2. Configurar Parámetros y Restricciones")
 restricciones_finales = {}
 if atrasos_disponibles_int:
     with st.expander("Configurar Restricciones de Atraso"):
-        # ... (código de restricciones de atraso sin cambios)
         selected_atrasos = st.multiselect("Selecciona 'Atraso' a restringir:", options=[str(a) for a in atrasos_disponibles_int], default=[str(a) for a in atrasos_disponibles_int])
         cols = st.columns(4)
         for i, atraso_str in enumerate(selected_atrasos):
@@ -235,20 +265,18 @@ if atrasos_disponibles_int:
                 limit = st.number_input(f"Max Atraso '{atraso_str}':", min_value=0, max_value=n_selecciones, value=atraso_counts.get(atraso_str, 0), key=f"res_{atraso_str}")
                 restricciones_finales[atraso_str] = limit
 
-# --- NUEVO: Expander para el filtro del Cálculo Especial ---
-special_calc_range = (0, 1000) # Un rango por defecto muy amplio
-if historical_combinations_set and total_atraso_dataset is not None:
+special_calc_range = (0, 99999) 
+if historical_combinations_set and total_atraso_dataset is not None and numero_a_atraso:
     with st.expander("Configurar Filtro de 'Cálculo Especial'", expanded=True):
         stats = analyze_historical_special_calc(historical_combinations_set, total_atraso_dataset, numero_a_atraso)
         if stats:
             st.info(f"Análisis del historial: El 'Cálculo Especial' varía de **{stats['min']}** a **{stats['max']}**, con un promedio de **{stats['mean']}**.")
-            # Rango por defecto: promedio ± 1 desviación estándar
             default_range_start = stats['mean'] - stats['std']
             default_range_end = stats['mean'] + stats['std']
             
             special_calc_range = st.slider(
                 "Selecciona el rango deseado para el 'Cálculo Especial':",
-                min_value=stats['min'] - 50, # Dar un poco de margen
+                min_value=stats['min'] - 50,
                 max_value=stats['max'] + 50,
                 value=(default_range_start, default_range_end)
             )
@@ -256,10 +284,9 @@ if historical_combinations_set and total_atraso_dataset is not None:
             st.warning("No se pudo analizar el historial para sugerir un rango.")
 
 with st.expander("Configurar Parámetros de los Algoritmos"):
-    # ... (código de parámetros de algoritmos sin cambios)
     col_ga, col_sim = st.columns(2)
     with col_ga: st.subheader("Algoritmo Genético"); ga_ngen=st.slider("Generaciones",10,1000,200); ga_npob=st.slider("Población",100,5000,1000); ga_cxpb=st.slider("Cruce",0.0,1.0,0.7); ga_mutpb=st.slider("Mutación",0.0,1.0,0.2)
-    with col_sim: st.subheader("Simulación Concurrente"); sim_n_comb=st.number_input("Combinaciones/Ejec.",1000,value=100000); sim_n_ejec=st.number_input("Ejecuciones",1,value=8)
+    with col_sim: st.subheader("Simulación Concurrente"); sim_n_comb=st.number_input("Combinaciones/Ejec.",1000,value=50000); sim_n_ejec=st.number_input("Ejecuciones",1,value=8)
 
 st.header("3. Ejecutar Algoritmos")
 if not numero_a_atraso:
@@ -286,13 +313,44 @@ else:
     with run_col2:
         if st.button("Ejecutar Simulación Concurrente"):
             with st.spinner("Generando y procesando combinaciones en paralelo..."):
+                start_time = time.time()
                 resultados = procesar_combinaciones(
                     distribucion_probabilidad, numero_a_atraso, restricciones_finales,
                     n_selecciones, sim_n_comb, sim_n_ejec, historical_combinations_set,
                     total_atraso_dataset, special_calc_range
                 )
                 coincidentes = encontrar_combinaciones_coincidentes(resultados)
-            
+                analisis_suma_esp = analizar_suma_especial_probabilidad(
+                    resultados, numero_a_atraso, total_atraso_dataset
+                )
+                end_time = time.time()
+                st.info(f"Simulación completada en {end_time - start_time:.2f} segundos.")
+
+            st.subheader("Análisis de 'Cálculo Especial' Más Probable")
+            if analisis_suma_esp:
+                suma_counts, total_combs = analisis_suma_esp
+                suma_mas_probable, conteo = suma_counts.most_common(1)[0]
+                probabilidad = (conteo / total_combs) * 100
+                
+                st.success(f"**El 'Cálculo Especial' con mayor probabilidad de salir es: {suma_mas_probable}**")
+                st.metric(
+                    label=f"Valor más probable del 'Cálculo Especial'",
+                    value=int(suma_mas_probable),
+                    delta=f"{probabilidad:.2f}% de las combinaciones válidas generadas",
+                    delta_color="off"
+                )
+
+                st.write("Top 5 'Cálculos Especiales' más frecuentes:")
+                top_5_sumas = suma_counts.most_common(5)
+                df_top_sumas = pd.DataFrame(top_5_sumas, columns=['Cálculo Especial', 'Frecuencia'])
+                df_top_sumas['Probabilidad (%)'] = (df_top_sumas['Frecuencia'] / total_combs) * 100
+                st.dataframe(df_top_sumas)
+                
+                st.bar_chart(df_top_sumas.set_index('Cálculo Especial')['Frecuencia'])
+                
+            else:
+                st.warning("No se generaron datos para analizar la probabilidad del 'Cálculo Especial'.")
+
             st.subheader("Combinaciones Coincidentes (Simulación)")
             if coincidentes:
                 data = []
@@ -316,4 +374,8 @@ st.sidebar.markdown("""
 **NUEVO: Filtro de Cálculo Especial**
 - Si cargas un archivo de historial, la aplicación lo analizará para encontrar el rango típico del "Cálculo Especial".
 - Puedes usar el *slider* para definir un **rango objetivo**. Los algoritmos solo buscarán combinaciones que resulten en un "Cálculo Especial" dentro de este rango.
+
+**NUEVO: Análisis de Probabilidad del 'Cálculo Especial'**
+- La simulación concurrente ahora analiza **todas** las combinaciones válidas que genera para determinar cuál es el valor del "Cálculo Especial" más frecuente.
+- Este es un indicador más robusto y estadísticamente significativo que buscar combinaciones exactas que se repitan.
 """)
