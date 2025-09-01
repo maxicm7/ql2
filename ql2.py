@@ -170,7 +170,7 @@ if df is not None:
 
                 if st.button("Aplicar Composición Sugerida"):
                     st.session_state.suggested_composition = most_common_comp
-                    st.experimental_rerun()
+                    st.rerun()
                 
                 with st.container():
                     df_comp = pd.DataFrame(most_common, columns=['Composición (C-T-F-C)', 'Frecuencia'])
