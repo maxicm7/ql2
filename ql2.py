@@ -15,12 +15,10 @@ if "FitnessMax" not in creator.__dict__:
 if "Individual" not in creator.__dict__:
     creator.create("Individual", list, fitness=creator.FitnessMax)
 
-# ----------------------- Funciones de Carga y Procesamiento de Datos (CORREGIDAS) -----------------------
-
+# ----------------------- Funciones de Carga y Procesamiento de Datos -----------------------
 @st.cache_data
 def load_data_and_counts(uploaded_file):
-    if uploaded_file is None:
-        return None, {}, {}, {}, [], {}, 0, {}
+    if uploaded_file is None: return None, {}, {}, {}, [], {}, 0, {}
     try:
         df = pd.read_csv(uploaded_file)
         if 'Numero' not in df.columns or 'Atraso' not in df.columns or 'Frecuencia' not in df.columns:
@@ -50,16 +48,13 @@ def load_data_and_counts(uploaded_file):
 
 @st.cache_data
 def load_historical_combinations(uploaded_file):
-    if uploaded_file is None:
-        return []
+    if uploaded_file is None: return []
     try:
         df_hist = pd.read_csv(uploaded_file, header=None)
         historical_sets = [set(pd.to_numeric(row, errors='coerce').dropna().astype(int)) for _, row in df_hist.iterrows()]
         historical_sets = [s for s in historical_sets if len(s) >= 6]
-        if historical_sets:
-            st.success(f"Archivo de historial cargado: {len(historical_sets)} combinaciones.")
-        else:
-            st.warning("El archivo de historial no contenía combinaciones válidas.")
+        if historical_sets: st.success(f"Archivo de historial cargado: {len(historical_sets)} combinaciones.")
+        else: st.warning("El archivo de historial no contenía combinaciones válidas.")
         return historical_sets
     except Exception as e:
         st.error(f"Error al procesar el archivo de historial: {e}")
@@ -148,7 +143,7 @@ def evaluar_individuo_deap(individuo, dist_prob, num_a_atraso, num_a_freq, restr
     cv_freq = np.std(freqs) / mean_freq
     if not (freq_cv_range[0] <= cv_freq <= freq_cv_range[1]): return (0,)
         
-    if any(Counter(num_a_atraso.get(val) for val in individuo)[int(a)] > l for a, l in restr_atraso.items()): return (0,)
+    if any(Counter(num_a_atraso.get(val) for val in individuo if num_a_atraso.get(val) is not None).get(a, 0) > l for a, l in restr_atraso.items()): return (0,)
     if hist_combs and any(len(set(int(n) for n in individuo).intersection(h)) > 2 for h in hist_combs): return (0,)
     suma_atrasos = sum(num_a_atraso.get(val, 0) for val in individuo)
     valor_especial = total_atraso + 40 - suma_atrasos
@@ -194,8 +189,7 @@ if df is not None:
      st.info(f"**Suma total de 'Atraso' en el dataset:** {total_atraso}")
 
 st.header("2. Configurar Filtros de Homeostasis (Etapa 1)")
-restricciones_finales = {}
-composicion_rules = {}
+restricciones_finales, composicion_rules = {}, {}
 special_calc_range, freq_cv_range = (0, 99999), (0.0, 999.9)
 
 if df is not None:
@@ -206,15 +200,34 @@ if df is not None:
                 stats_freq_cv = analyze_historical_frequency_cv(historical_combinations_set, num_a_freq)
                 if stats_freq_cv:
                     st.info(f"Historial: CV de Frecuencia varía de **{stats_freq_cv['min']:.2f}** a **{stats_freq_cv['max']:.2f}**, con un promedio de **{stats_freq_cv['mean']:.2f}**.")
-                    default_range_cv = (stats_freq_cv['mean'] - stats_freq_cv['std'], stats_freq_cv['mean'] + stats_freq_cv['std'])
-                    freq_cv_range = st.slider("Rango deseado para CV de Frecuencia:", 0.0, 2.0, default_range_cv, format="%.2f", key="freq_cv_slider")
+                    
+                    # CORRECCIÓN: Sujetar los valores por defecto para que estén dentro de los límites del slider.
+                    slider_min_cv = 0.0
+                    slider_max_cv = 2.0
+                    default_start_cv = stats_freq_cv['mean'] - stats_freq_cv['std']
+                    default_end_cv = stats_freq_cv['mean'] + stats_freq_cv['std']
+                    
+                    clamped_start_cv = max(slider_min_cv, default_start_cv)
+                    clamped_end_cv = min(slider_max_cv, default_end_cv)
+                    
+                    freq_cv_range = st.slider("Rango deseado para CV de Frecuencia:", slider_min_cv, slider_max_cv, (clamped_start_cv, clamped_end_cv), format="%.2f", key="freq_cv_slider")
+
         with col_spec:
             with st.expander("Filtro de 'Cálculo Especial' (Corto Plazo)", expanded=True):
                 stats_special = analyze_historical_special_calc(historical_combinations_set, total_atraso, num_a_atraso)
                 if stats_special:
                     st.info(f"Historial: 'Cálculo Especial' varía de **{stats_special['min']}** a **{stats_special['max']}**.")
-                    default_range_special = (stats_special['mean'] - stats_special['std'], stats_special['mean'] + stats_special['std'])
-                    special_calc_range = st.slider("Rango deseado:", min_value=float(stats_special['min'] - 50), max_value=float(stats_special['max'] + 50), value=default_range_special, key="special_slider")
+                    
+                    # CORRECCIÓN: Sujetar los valores por defecto para que estén dentro de los límites del slider.
+                    slider_min_special = float(stats_special['min'] - 50)
+                    slider_max_special = float(stats_special['max'] + 50)
+                    default_start_special = float(stats_special['mean'] - stats_special['std'])
+                    default_end_special = float(stats_special['mean'] + stats_special['std'])
+
+                    clamped_start_special = max(slider_min_special, default_start_special)
+                    clamped_end_special = min(slider_max_special, default_end_special)
+
+                    special_calc_range = st.slider("Rango deseado:", min_value=slider_min_special, max_value=slider_max_special, value=(clamped_start_special, clamped_end_special), key="special_slider")
 
     with st.expander("Filtro de Atrasos Individuales y Composición (Etapa 1 y 2)"):
         st.subheader("Filtro de Atrasos Individuales (Etapa 1)")
