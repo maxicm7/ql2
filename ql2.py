@@ -15,49 +15,55 @@ if "FitnessMax" not in creator.__dict__:
 if "Individual" not in creator.__dict__:
     creator.create("Individual", list, fitness=creator.FitnessMax)
 
-# ----------------------- Funciones de Carga y Procesamiento de Datos -----------------------
+# ----------------------- Funciones de Carga y Procesamiento de Datos (CORREGIDAS) -----------------------
+
 @st.cache_data
 def load_data_and_counts(uploaded_file):
-    if uploaded_file is not None:
-        try:
-            df = pd.read_csv(uploaded_file)
-            if 'Numero' in df.columns and 'Atraso' in df.columns and 'Frecuencia' in df.columns:
-                df['Numero'] = pd.to_numeric(df['Numero'], errors='coerce')
-                df['Atraso'] = pd.to_numeric(df['Atraso'], errors='coerce')
-                df['Frecuencia'] = pd.to_numeric(df['Frecuencia'], errors='coerce')
-                df.dropna(subset=['Numero', 'Atraso', 'Frecuencia'], inplace=True)
-                df['Numero'], df['Atraso'], df['Frecuencia'] = df['Numero'].astype(int).astype(str), df['Atraso'].astype(int), df['Frecuencia'].astype(int)
+    if uploaded_file is None:
+        return None, {}, {}, {}, [], {}, 0, {}
+    try:
+        df = pd.read_csv(uploaded_file)
+        if 'Numero' not in df.columns or 'Atraso' not in df.columns or 'Frecuencia' not in df.columns:
+            st.error("El archivo debe contener las columnas 'Numero', 'Atraso' y 'Frecuencia'.")
+            return None, {}, {}, {}, [], {}, 0, {}
 
-                st.success("Archivo de datos cargado exitosamente.")
-                numero_a_atraso = dict(zip(df['Numero'], df['Atraso']))
-                numero_a_frecuencia = dict(zip(df['Numero'], df['Frecuencia']))
-                atrasos_disponibles_int = sorted(df['Atraso'].unique())
-                numeros_validos = list(numero_a_atraso.keys())
-                distribucion_probabilidad = {num: 1.0/len(numeros_validos) for num in numeros_validos}
-                atraso_counts = df['Atraso'].astype(str).value_counts().to_dict()
-                total_atraso_dataset = df['Atraso'].sum()
-                atraso_stats = {"min": df['Atraso'].min(), "max": df['Atraso'].max(), "p25": df['Atraso'].quantile(0.25), "p75": df['Atraso'].quantile(0.75)}
+        df['Numero'] = pd.to_numeric(df['Numero'], errors='coerce')
+        df['Atraso'] = pd.to_numeric(df['Atraso'], errors='coerce')
+        df['Frecuencia'] = pd.to_numeric(df['Frecuencia'], errors='coerce')
+        df.dropna(subset=['Numero', 'Atraso', 'Frecuencia'], inplace=True)
+        df['Numero'], df['Atraso'], df['Frecuencia'] = df['Numero'].astype(int).astype(str), df['Atraso'].astype(int), df['Frecuencia'].astype(int)
 
-                return df, numero_a_atraso, numero_a_frecuencia, distribucion_probabilidad, atrasos_disponibles_int, atraso_counts, total_atraso_dataset, atraso_stats
-            else:
-                 st.error("El archivo debe contener las columnas 'Numero', 'Atraso' y 'Frecuencia'.")
+        st.success("Archivo de datos cargado exitosamente.")
+        numero_a_atraso = dict(zip(df['Numero'], df['Atraso']))
+        numero_a_frecuencia = dict(zip(df['Numero'], df['Frecuencia']))
+        atrasos_disponibles_int = sorted(df['Atraso'].unique())
+        numeros_validos = list(numero_a_atraso.keys())
+        distribucion_probabilidad = {num: 1.0/len(numeros_validos) for num in numeros_validos} if numeros_validos else {}
+        atraso_counts = df['Atraso'].astype(str).value_counts().to_dict()
+        total_atraso_dataset = df['Atraso'].sum()
+        atraso_stats = {"min": df['Atraso'].min(), "max": df['Atraso'].max(), "p25": df['Atraso'].quantile(0.25), "p75": df['Atraso'].quantile(0.75)}
+
+        return df, numero_a_atraso, numero_a_frecuencia, distribucion_probabilidad, atrasos_disponibles_int, atraso_counts, total_atraso_dataset, atraso_stats
     except Exception as e:
         st.error(f"Error al procesar el archivo de datos: {e}")
-    return None, {}, {}, {}, [], {}, 0, {}
+        return None, {}, {}, {}, [], {}, 0, {}
 
 @st.cache_data
 def load_historical_combinations(uploaded_file):
-    if uploaded_file is None: return []
+    if uploaded_file is None:
+        return []
     try:
         df_hist = pd.read_csv(uploaded_file, header=None)
         historical_sets = [set(pd.to_numeric(row, errors='coerce').dropna().astype(int)) for _, row in df_hist.iterrows()]
         historical_sets = [s for s in historical_sets if len(s) >= 6]
-        if historical_sets: st.success(f"Archivo de historial cargado: {len(historical_sets)} combinaciones.")
-        else: st.warning("El archivo de historial no contenía combinaciones válidas.")
+        if historical_sets:
+            st.success(f"Archivo de historial cargado: {len(historical_sets)} combinaciones.")
+        else:
+            st.warning("El archivo de historial no contenía combinaciones válidas.")
         return historical_sets
     except Exception as e:
         st.error(f"Error al procesar el archivo de historial: {e}")
-    return []
+        return []
 
 # --- Funciones de Análisis Histórico ---
 @st.cache_data
@@ -81,8 +87,15 @@ def analyze_historical_frequency_cv(historical_sets, numero_a_frecuencia):
 
 @st.cache_data
 def analyze_historical_composition(historical_sets, numero_a_atraso, composicion_ranges):
-    # ... (Sin cambios)
-    pass 
+    if not historical_sets: return None
+    def get_category(atraso, ranges):
+        if ranges['caliente'][0] <= atraso <= ranges['caliente'][1]: return 'caliente'
+        elif ranges['tibio'][0] <= atraso <= ranges['tibio'][1]: return 'tibio'
+        elif ranges['frio'][0] <= atraso <= ranges['frio'][1]: return 'frio'
+        elif atraso >= ranges['congelado'][0]: return 'congelado'
+        return 'otro'
+    counts = Counter(tuple(Counter(get_category(numero_a_atraso.get(str(num), -1), composicion_ranges) for num in s).get(cat, 0) for cat in ['caliente', 'tibio', 'frio', 'congelado']) for s in historical_sets)
+    return counts if counts else None
 
 # --- Motores de Generación y Filtrado ---
 def generar_combinaciones_con_restricciones(dist_prob, num_a_atraso, num_a_freq, restr_atraso, n_sel, n_comb, hist_combs, total_atraso, special_range, freq_cv_range):
@@ -117,6 +130,15 @@ def procesar_combinaciones(dist_prob, num_a_atraso, num_a_freq, restr_atraso, n_
     with ProcessPoolExecutor() as executor:
         return [future.result() for future in as_completed([executor.submit(generar_combinaciones_con_restricciones, *args) for _ in range(n_ejec)])]
 
+def filtrar_por_composicion(combinaciones, numero_a_atraso, composicion_rules):
+    def get_category(atraso, ranges):
+        if ranges['caliente'][0] <= atraso <= ranges['caliente'][1]: return 'caliente'
+        elif ranges['tibio'][0] <= atraso <= ranges['tibio'][1]: return 'tibio'
+        elif ranges['frio'][0] <= atraso <= ranges['frio'][1]: return 'frio'
+        elif atraso >= ranges['congelado'][0]: return 'congelado'
+        return 'otro'
+    return [c for c in combinaciones if all(Counter(get_category(numero_a_atraso.get(str(n),-1), composicion_rules['ranges']) for n in c).get(cat,0)==cnt for cat,cnt in composicion_rules['counts'].items())]
+
 def evaluar_individuo_deap(individuo, dist_prob, num_a_atraso, num_a_freq, restr_atraso, n_sel, hist_combs, total_atraso, special_range, freq_cv_range):
     if len(individuo) != n_sel or len(set(individuo)) != n_sel: return (0,)
     
@@ -135,10 +157,20 @@ def evaluar_individuo_deap(individuo, dist_prob, num_a_atraso, num_a_freq, restr
     return (np.prod([dist_prob.get(val, 0) for val in individuo]),)
 
 def ejecutar_algoritmo_genetico(n_gen, n_pob, cxpb, mutpb, dist_prob, num_a_atraso, num_a_freq, restr_atraso, hist_combs, total_atraso, special_range, freq_cv_range, n_sel=6):
-    # ... (La estructura es la misma, solo cambia la llamada a 'evaluate')
-    pass 
-    
-# (El código completo y funcional de todas las funciones de backend se incluirá al final)
+    toolbox = base.Toolbox()
+    toolbox.register("indices", random.sample, list(dist_prob.keys()), n_sel)
+    toolbox.register("individual", tools.initIterate, creator.Individual, toolbox.indices)
+    toolbox.register("population", tools.initRepeat, list, toolbox.individual)
+    toolbox.register("evaluate", evaluar_individuo_deap, dist_prob=dist_prob, num_a_atraso=num_a_atraso, num_a_freq=num_a_freq, restr_atraso=restr_atraso, n_sel=n_sel, hist_combs=hist_combs, total_atraso=total_atraso, special_range=special_range, freq_cv_range=freq_cv_range)
+    toolbox.register("mate", tools.cxTwoPoint); toolbox.register("mutate", tools.mutShuffleIndexes, indpb=0.1); toolbox.register("select", tools.selTournament, tournsize=3)
+    pop = toolbox.population(n=n_pob)
+    algorithms.eaSimple(pop, toolbox, cxpb, mutpb, n_gen, verbose=False)
+    best = tools.selBest(pop, k=1)[0] if pop else None
+    if best:
+        best = sorted(list(set(best)), key=int)
+        if len(best) != n_sel: return None, 0.0, "AG no mantuvo individuos válidos."
+        return best, toolbox.evaluate(best)[0], None
+    return None, 0.0, "Población final vacía."
 
 # ----------------------- Interfaz Gráfica de Streamlit -----------------------
 
@@ -163,7 +195,8 @@ if df is not None:
 
 st.header("2. Configurar Filtros de Homeostasis (Etapa 1)")
 restricciones_finales = {}
-special_calc_range, freq_cv_range = (0, 99999), (0, 99999)
+composicion_rules = {}
+special_calc_range, freq_cv_range = (0, 99999), (0.0, 999.9)
 
 if df is not None:
     if historical_combinations_set:
@@ -181,42 +214,8 @@ if df is not None:
                 if stats_special:
                     st.info(f"Historial: 'Cálculo Especial' varía de **{stats_special['min']}** a **{stats_special['max']}**.")
                     default_range_special = (stats_special['mean'] - stats_special['std'], stats_special['mean'] + stats_special['std'])
-                    special_calc_range = st.slider("Rango deseado:", stats_special['min'] - 50, stats_special['max'] + 50, default_range_special, key="special_slider")
+                    special_calc_range = st.slider("Rango deseado:", min_value=float(stats_special['min'] - 50), max_value=float(stats_special['max'] + 50), value=default_range_special, key="special_slider")
 
-    with st.expander("Filtro de Atrasos Individuales y Composición (Etapa 1 y 2)"):
-        # ... (Aquí va la UI para Atrasos Individuales y Composición, sin cambios)
-        pass 
-else:
-    st.info("Carga un archivo de Datos ('Numero', 'Atraso', 'Frecuencia') para empezar.")
-
-# --- Código completo y funcional de todas las funciones de backend ---
-def filtrar_por_composicion(combinaciones, numero_a_atraso, composicion_rules):
-    def get_category(atraso, ranges):
-        if ranges['caliente'][0] <= atraso <= ranges['caliente'][1]: return 'caliente'
-        elif ranges['tibio'][0] <= atraso <= ranges['tibio'][1]: return 'tibio'
-        elif ranges['frio'][0] <= atraso <= ranges['frio'][1]: return 'frio'
-        elif atraso >= ranges['congelado'][0]: return 'congelado'
-        return 'otro'
-    return [c for c in combinaciones if all(Counter(get_category(numero_a_atraso.get(str(n),-1), composicion_rules['ranges']) for n in c).get(cat,0)==cnt for cat,cnt in composicion_rules['counts'].items())]
-
-def ejecutar_algoritmo_genetico(n_gen, n_pob, cxpb, mutpb, dist_prob, num_a_atraso, num_a_freq, restr_atraso, hist_combs, total_atraso, special_range, freq_cv_range, n_sel=6):
-    toolbox = base.Toolbox()
-    toolbox.register("indices", random.sample, list(dist_prob.keys()), n_sel)
-    toolbox.register("individual", tools.initIterate, creator.Individual, toolbox.indices)
-    toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-    toolbox.register("evaluate", evaluar_individuo_deap, dist_prob=dist_prob, num_a_atraso=num_a_atraso, num_a_freq=num_a_freq, restr_atraso=restr_atraso, n_sel=n_sel, hist_combs=hist_combs, total_atraso=total_atraso, special_range=special_range, freq_cv_range=freq_cv_range)
-    toolbox.register("mate", tools.cxTwoPoint); toolbox.register("mutate", tools.mutShuffleIndexes, indpb=0.1); toolbox.register("select", tools.selTournament, tournsize=3)
-    pop = toolbox.population(n=n_pob)
-    algorithms.eaSimple(pop, toolbox, cxpb, mutpb, n_gen, verbose=False)
-    best = tools.selBest(pop, k=1)[0] if pop else None
-    if best:
-        best = sorted(list(set(best)), key=int)
-        if len(best) != n_sel: return None, 0.0, "AG no mantuvo individuos válidos."
-        return best, toolbox.evaluate(best)[0], None
-    return None, 0.0, "Población final vacía."
-
-# --- UI completa (reemplaza las secciones omitidas) ---
-if df is not None:
     with st.expander("Filtro de Atrasos Individuales y Composición (Etapa 1 y 2)"):
         st.subheader("Filtro de Atrasos Individuales (Etapa 1)")
         selected_atrasos = st.multiselect("Selecciona 'Atraso' a restringir:", options=[str(a) for a in atrasos_disp], default=[str(a) for a in atrasos_disp])
@@ -226,7 +225,7 @@ if df is not None:
                 limit = st.number_input(f"Max Atraso '{atraso_str}':", 0, n_selecciones, atraso_counts.get(atraso_str, 0), key=f"res_{atraso_str}")
                 restricciones_finales[atraso_str] = limit
         
-        st.subheader("Filtro de Composición de Atrasos (Etapa 2)")
+        st.subheader("Filtro Estratégico de Composición (Etapa 2)")
         max_atraso = atraso_stats.get("max", 100)
         c1, c2 = st.columns(2)
         with c1:
@@ -264,6 +263,8 @@ if df is not None:
         col_ga, col_sim = st.columns(2)
         with col_ga: st.subheader("Algoritmo Genético"); ga_ngen=st.slider("Generaciones",10,1000,200); ga_npob=st.slider("Población",100,5000,1000); ga_cxpb=st.slider("Cruce",0.0,1.0,0.7); ga_mutpb=st.slider("Mutación",0.0,1.0,0.2)
         with col_sim: st.subheader("Simulación en Cascada"); sim_n_comb=st.number_input("Combinaciones/Ejec.",1000,value=50000); sim_n_ejec=st.number_input("Ejecuciones",1,value=8)
+else:
+    st.info("Carga un archivo de Datos ('Numero', 'Atraso', 'Frecuencia') para empezar.")
 
 st.header("3. Ejecutar Algoritmos")
 if df is not None:
@@ -301,7 +302,9 @@ if df is not None:
                 for c in combinaciones_refinadas:
                     freqs = [num_a_freq.get(str(v),0) for v in c]
                     data.append({"Combinación": " - ".join(map(str, sorted(c))), "CV Frecuencia": np.std(freqs)/np.mean(freqs), "Cálculo Especial": total_atraso + 40 - sum(num_a_atraso.get(str(v),0) for v in c)})
-                st.dataframe(pd.DataFrame(data).reset_index(drop=True))
+                df_results = pd.DataFrame(data)
+                df_results['CV Frecuencia'] = df_results['CV Frecuencia'].map('{:,.2f}'.format)
+                st.dataframe(df_results.reset_index(drop=True))
             else: st.info("Ninguna combinación superó el filtro de la Etapa 2.")
 
 st.sidebar.header("Guía del Modelo")
