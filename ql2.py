@@ -279,19 +279,31 @@ if df is not None:
 else:
     st.info("Carga un archivo de Datos ('Numero', 'Atraso', 'Frecuencia') para empezar.")
 
+# ... (código anterior) ...
+
 st.header("3. Ejecutar Algoritmos")
 if df is not None:
     run_col1, run_col2 = st.columns(2)
     with run_col1:
         if st.button("Ejecutar Algoritmo Genético"):
             with st.spinner("Buscando la mejor combinación..."):
-                mejor_ind, _, err_msg = ejecutar_algoritmo_genetico(ga_ngen, ga_npob, ga_cxpb, mutpb, dist_prob, num_a_atraso, num_a_freq, restricciones_finales, historical_combinations_set, total_atraso, special_calc_range, freq_cv_range, n_selecciones)
+                # CORRECCIÓN: Se cambió 'mutpb' a 'ga_mutpb' para que coincida con la definición del slider.
+                mejor_ind, _, err_msg = ejecutar_algoritmo_genetico(
+                    ga_ngen, ga_npob, ga_cxpb, ga_mutpb, 
+                    dist_prob, num_a_atraso, num_a_freq, 
+                    restricciones_finales, historical_combinations_set, 
+                    total_atraso, special_calc_range, freq_cv_range, n_selecciones
+                )
             if err_msg: st.error(err_msg)
             elif mejor_ind:
-                st.subheader("Mejor Combinación (GA)"); st.success(f"**Combinación: {' - '.join(map(str, mejor_ind))}**")
-                freqs = [num_a_freq.get(v, 0) for v in mejor_ind]; st.write(f"**CV Frecuencia:** {np.std(freqs) / np.mean(freqs):.2f}")
+                st.subheader("Mejor Combinación (GA)")
+                st.success(f"**Combinación: {' - '.join(map(str, mejor_ind))}**")
+                freqs = [num_a_freq.get(v, 0) for v in mejor_ind]
+                st.write(f"**CV Frecuencia:** {np.std(freqs) / np.mean(freqs):.2f}")
                 st.write(f"**Cálculo Especial:** {total_atraso + 40 - sum(num_a_atraso.get(v, 0) for v in mejor_ind)}")
             else: st.warning("El GA no encontró una combinación válida.")
+
+
 
     with run_col2:
         if st.button("Ejecutar Simulación en Cascada"):
